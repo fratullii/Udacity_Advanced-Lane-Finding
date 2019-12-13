@@ -5,8 +5,9 @@ echo
 git pull
 echo
 
+upstreamVar='https://github.com/fratullii/Udacity_Advanced-Lane-Finding.git'
+
 # Ask the user for login details
-read -p 'Git repository url: ' upstreamVar
 read -p 'Git Username: ' userVar
 read -p 'Git email: ' emailVar
 
