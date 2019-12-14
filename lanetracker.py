@@ -425,7 +425,7 @@ class Line():
         self.curr_coeffs = None
         self.nframes = nframes
         self.tframe = 0
-        self.temp_curvature = None
+        self.temp_curvature = np.array([])
         self.curvature = np.array([])
     
     def update(self, coeffs):
@@ -438,12 +438,12 @@ class Line():
             self.unfiltered_coeffs = np.vstack([self.unfiltered_coeffs, coeffs])
             self.curr_coeffs = np.mean(self.unfiltered_coeffs[-span_avg:,:], axis=0)
             self.coeffs = np.vstack([self.coeffs, self.curr_coeffs])
+            self.curvature = np.vstack([self.curvature, np.mean(self.temp_curvature[-span_avg:],axis=0)])
         except:
             self.curr_coeffs = coeffs
             self.unfiltered_coeffs = coeffs
             self.coeffs = coeffs
-            
-        self.curvature = np.append(self.curvature, self.temp_curvature)
+            self.curvature = np.append(self.curvature, self.temp_curvature[-1])
         
         return
 
@@ -470,5 +470,6 @@ class Line():
         return flag
     
     def measure_curvature(self, coeffs_real, y_eval):
-        self.temp_curvature = (1 + (2*coeffs_real[0]*y_eval + coeffs_real[1])**2)**(3/2) / np.abs(2*coeffs_real[0])
+        curverad = (1 + (2*coeffs_real[0]*y_eval + coeffs_real[1])**2)**(3/2) / np.abs(2*coeffs_real[0])
+        self.temp_curvature = np.append(self.temp_curvature, curverad)
         return
