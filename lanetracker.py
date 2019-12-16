@@ -187,13 +187,12 @@ class Processor():
         
         # Update lines: search from prior, sliding window, use previous
         if self.first_frame:
-            left_coeffs, right_coeffs = self.sliding_window(binary_warped)
+            left_coeffs, right_coeffs, left_coeffs_real, right_coeffs_real = self.sliding_window(binary_warped)
             try:
                 self.left_line.measure_curvature(left_coeffs, self.dst[3,1]*self.ymp)
                 self.right_line.measure_curvature(right_coeffs, self.dst[3,1]*self.ymp)
                 self.left_line.update(left_coeffs)
-                self.right_line.update(right_coeffs)
-                
+                self.right_line.update(right_coeffs) 
                 self.first_frame = False
             except:
                 self.left_line.update_without()
@@ -203,41 +202,21 @@ class Processor():
                 
         else:
             
-            # Try to search around previous polynomial
-            try:
-                left_coeffs, right_coeffs = self.search_around_poly(binary_warped, self.left_line.curr_coeffs, 
-                                                               self.right_line.curr_coeffs)
-                self.left_line.measure_curvature(left_coeffs, self.dst[3,1]*self.ymp)
-                self.right_line.measure_curvature(right_coeffs, self.dst[3,1]*self.ymp)
-                lflag_prior = self.left_line.catch_outlier(left_coeffs)
-                rflag_prior = self.right_line.catch_outlier(right_coeffs)
-                flag_prior = lflag_prior or rflag_prior
-            except:
-                flag_prior = True
+            # Search around previous polynomials
+            left_coeffs, right_coeffs, left_coeffs_real, right_coeffs_real  = self.search_around_poly(binary_warped)
             
-            # Use sliding window is one of the two lines couldn't be detected at previous step
-            if flag_prior:
-                left_coeffs, right_coeffs = self.sliding_window(binary_warped)
-                lflag_slide = self.left_line.catch_outlier(left_coeffs)
-                rflag_slide = self.right_line.catch_outlier(right_coeffs)
-            else:
-                lflag_slide = False
-                rflag_slide = False
-                
-            # Update left line
-            if flag_prior and lflag_slide:
-                self.left_line.update_without()
-            else:
-                self.left_line.measure_curvature(left_coeffs, self.dst[3,1]*self.ymp)
+            if self.validate_poly(left_coeffs, right_coeffs, left_coeffs_real, right_coeffs_real):
                 self.left_line.update(left_coeffs)
-            
-            # Update right line
-            if flag_prior and rflag_slide:
-                self.right_line.measure_curvature(right_coeffs, self.dst[3,1]*self.ymp)
-                self.right_line.update_without()
-            else:
                 self.right_line.update(right_coeffs)
-                
+            else:
+                left_coeffs, right_coeffs, left_coeffs_real, right_coeffs_real = self.sliding_window(binary_warped)
+                if self.validate_poly(left_coeffs, right_coeffs, left_coeffs_real, right_coeffs_real):
+                    self.left_line.update(left_coeffs)
+                    self.right_line.update(right_coeffs)
+                else:
+                    self.left_line.update_without()
+                    self.right_line.update_without()
+      
         # Update various values
         self.update_values()
         
@@ -249,6 +228,22 @@ class Processor():
             annotated_frame = np.copy(frame)
             
         return annotated_frame
+    
+    def validate_poly(self, lc, rc, lcr, rcr, lw_thresh=0.4, curv_thresh=0):
+        """
+        Performs sanity check  on polynomials found. Returns True if ok, False otherwise.
+        """
+        
+        if lc.any() and rc.any():
+            lane_width, offset = self.measure_offset(lc, rc)
+            self.left_line.measure_curvature(lcr, self.dst[3,1]*self.ymp)
+            self.right_line.measure_curvature(rcr, self.dst[3,1]*self.ymp)
+            lane_width_flag = np.abs(self.lane_width[-1] - lane_width) < lw_thresh
+            curv_flag = np.abs(self.left_line.temp_curvature - self.right_line.temp_curvature) < curv_thresh
+            flag = lane_width_flag
+        else:
+            flag = False
+        return flag
     
     def measure_offset(self, lc, rc):
         # Road line closest to the car
@@ -339,26 +334,29 @@ class Processor():
         lefty = nonzeroy[left_lane_inds] 
         rightx = nonzerox[right_lane_inds]
         righty = nonzeroy[right_lane_inds]
-        
+                
+        # Lane pixel coordinates in meters space        
         leftx_real = leftx * self.xmp
         lefty_real = lefty * self.ymp
         rightx_real = rightx * self.xmp
         righty_real = righty * self.ymp
     
 
-        # Fit a second order polynomial to each using `np.polyfit`
+        # Try to fit a second order polynomial to each using `np.polyfit`
         try:
             left_fit = np.polyfit(lefty, leftx, 2)
             left_fit_real = np.polyfit(lefty_real, leftx_real, 2)
         except:
-            left_fit = False
+            left_fit = np.array([False, False, False])
+            left_fit_real = np.array([False, False, False])
         try:
             right_fit = np.polyfit(righty, rightx, 2)
             right_fit_real = np.polyfit(righty_real, rightx_real, 2)
         except:
-            left_fit = False
+            right_fit = np.array([False, False, False])
+            right_fit_real = np.array([False, False, False])
 
-        return left_fit, right_fit
+        return left_fit, right_fit, left_fit_real, right_fit_real
     
 
     def draw_lines(self, frame, binary_warped, left_fit, right_fit):
@@ -387,7 +385,11 @@ class Processor():
 
         return result
 
-    def search_around_poly(self, binary_warped, left_fit, right_fit):
+    def search_around_poly(self, binary_warped):
+                
+        # Get previous polynomials
+        left_fit = self.left_line.curr_coeffs
+        right_fit = self.right_line.curr_coeffs
 
         # Grab activated pixels
         nonzero = binary_warped.nonzero()
@@ -407,10 +409,28 @@ class Processor():
         rightx = nonzerox[right_lane_inds]
         righty = nonzeroy[right_lane_inds]
 
-        left_fit = np.polyfit(lefty, leftx, 2)
-        right_fit = np.polyfit(righty, rightx, 2)
+        # Lane pixel coordinates in meters space        
+        leftx_real = leftx * self.xmp
+        lefty_real = lefty * self.ymp
+        rightx_real = rightx * self.xmp
+        righty_real = righty * self.ymp
+    
 
-        return left_fit, right_fit
+        # Try to fit a second order polynomial to each using `np.polyfit`
+        try:
+            left_fit = np.polyfit(lefty, leftx, 2)
+            left_fit_real = np.polyfit(lefty_real, leftx_real, 2)
+        except:
+            left_fit = np.array([False, False, False])
+            left_fit_real = np.array([False, False, False])
+        try:
+            right_fit = np.polyfit(righty, rightx, 2)
+            right_fit_real = np.polyfit(righty_real, rightx_real, 2)
+        except:
+            right_fit = np.array([False, False, False])
+            right_fit_real = np.array([False, False, False])
+
+        return left_fit, right_fit, left_fit_real, right_fit_real
 
 class Line():
     """
@@ -460,14 +480,6 @@ class Line():
         self.curvature = np.append(self.curvature, self.curvature[-1])
         
         return
-    
-    def catch_outlier(self,coeffs,avar=10e-5,bvar=0.10,cvar=100,curvar=1e10):
-        try:
-            var_array = np.abs(coeffs - self.curr_coeffs) > np.array([avar,bvar,cvar])
-            flag = (np.sum(var_array) == 3)
-        except:
-            flag = True
-        return flag
     
     def measure_curvature(self, coeffs_real, y_eval):
         curverad = (1 + (2*coeffs_real[0]*y_eval + coeffs_real[1])**2)**(3/2) / np.abs(2*coeffs_real[0])
