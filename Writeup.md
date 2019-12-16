@@ -181,9 +181,9 @@ The code has undergone a thorough refactoring to apply all the steps on each fra
 
 The method ```process_frame``` starts by applying the sliding window on the first frame and then always tries to search around the previous polynomial, going back to the sliding window search when unsuccessful. If even in this case no pixels can be found, it uses the previous line.
 
-The outliers are identified when the variation of the polynomial coefficients is above a certain threshold and filtered out (they are treated by the program as an unsuccesful search).
+The outliers are identified by looking at variation of the lane width and the difference in the radius of curvature. When they rise above certain thresholds, the measurement is reported as outlier (it is treated by the program as an unsuccesful search).
 
-In order to smooth the signal, an average filter has been applied both on the polynomial coefficients and on the curvature radius. The offset instead does not show as much noise, so its values are just considered reliable and stored as they are.
+In order to smooth the signal, an average filter has been applied both on the polynomial coefficients and on the radius of curvature. The offset instead does not show as much noise, so its values are just considered reliable and stored as they are.
 
 <video width="480" height="270" controls>
   <source src="output_videos/video_output.mp4" type="video/mp4">
