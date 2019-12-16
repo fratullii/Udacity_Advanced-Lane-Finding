@@ -226,10 +226,11 @@ class Processor():
                                          self.right_line.curr_coeffs)
         except:
             annotated_frame = np.copy(frame)
+          
             
         return annotated_frame
     
-    def validate_poly(self, lc, rc, lcr, rcr, lw_thresh=0.4, curv_thresh=0):
+    def validate_poly(self, lc, rc, lcr, rcr, lw_thresh=0.4, curv_thresh=5e3):
         """
         Performs sanity check  on polynomials found. Returns True if ok, False otherwise.
         """
@@ -240,7 +241,7 @@ class Processor():
             self.right_line.measure_curvature(rcr, self.dst[3,1]*self.ymp)
             lane_width_flag = np.abs(self.lane_width[-1] - lane_width) < lw_thresh
             curv_flag = np.abs(self.left_line.temp_curvature - self.right_line.temp_curvature) < curv_thresh
-            flag = lane_width_flag
+            flag = lane_width_flag and curv_flag
         else:
             flag = False
         return flag
@@ -382,6 +383,12 @@ class Processor():
         newwarp = cv2.warpPerspective(color_warp, self.Minv, (frame.shape[1], frame.shape[0])) 
         # Combine the result with the original image
         result = cv2.addWeighted(frame, 1, newwarp, 0.3, 0)
+        
+        # Write curvature and offset data on it
+        curvradius = (self.left_line.curvature[-1] + self.right_line.curvature[-1]) / 2
+        textstring = "Offset: {:.2f} m  Curv Radius: {:.0f} m".format(float(self.offset[-1]), float(curvradius))
+        pos = (int(self.imshape[1]*.2), int(self.imshape[0]*.1))
+        cv2.putText(result, textstring, pos,cv2.FONT_HERSHEY_SIMPLEX, 1, color=(255,255,255), thickness=2)
 
         return result
 
@@ -445,7 +452,8 @@ class Line():
         self.curr_coeffs = None
         self.nframes = nframes
         self.tframe = 0
-        self.temp_curvature = np.array([])
+        self.temp_curvature = None
+        self.unfiltered_curvature = np.array([])
         self.curvature = np.array([])
     
     def update(self, coeffs):
@@ -458,12 +466,14 @@ class Line():
             self.unfiltered_coeffs = np.vstack([self.unfiltered_coeffs, coeffs])
             self.curr_coeffs = np.mean(self.unfiltered_coeffs[-span_avg:,:], axis=0)
             self.coeffs = np.vstack([self.coeffs, self.curr_coeffs])
-            self.curvature = np.vstack([self.curvature, np.mean(self.temp_curvature[-span_avg:],axis=0)])
         except:
             self.curr_coeffs = coeffs
             self.unfiltered_coeffs = coeffs
             self.coeffs = coeffs
-            self.curvature = np.append(self.curvature, self.temp_curvature[-1])
+        
+        self.unfiltered_curvature = np.append(self.unfiltered_curvature, self.temp_curvature)
+        self.curvature = np.append(self.curvature, np.mean(self.unfiltered_curvature[-span_avg:],axis=0))
+            
         
         return
 
@@ -477,11 +487,11 @@ class Line():
         self.curr_coeffs = np.mean(self.unfiltered_coeffs[-span_avg:,:], axis=0)
         self.coeffs = np.vstack([self.coeffs, self.curr_coeffs])
         
-        self.curvature = np.append(self.curvature, self.curvature[-1])
+        self.unfiltered_curvature = np.append(self.unfiltered_curvature, self.curvature[-1])
+        self.curvature = np.append(self.curvature, np.mean(self.unfiltered_curvature[-span_avg:],axis=0))
         
         return
     
     def measure_curvature(self, coeffs_real, y_eval):
-        curverad = (1 + (2*coeffs_real[0]*y_eval + coeffs_real[1])**2)**(3/2) / np.abs(2*coeffs_real[0])
-        self.temp_curvature = np.append(self.temp_curvature, curverad)
+        self.temp_curvature = (1 + (2*coeffs_real[0]*y_eval + coeffs_real[1])**2)**(3/2) / np.abs(2*coeffs_real[0])
         return
